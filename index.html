@@ -6,10 +6,32 @@
     <title>Indian Drought Monitor</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/alasql/4.4.0/alasql.min.js"></script>
+    <style>
+        /* body { background-color: #1a1a1a; font-family: sans-serif; } */
+        .map-container {
+            position: relative;
+            width: 840px;
+            height: 840px;
+            margin: 20px auto;
+            background-color: #ffffff;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 840px;
+            height: 840px;
+        }
+        /* CRITICAL: Vector layer goes on bottom for input detection, Raster is transparency-blended on top */
+        #C_raster { pointer-events: none; mix-blend-mode: multiply; }
+        #C_vector { z-index: 10; }
+    </style>
 </head>
 <body>
-    
-<p id="db-out"></p>    
+    <div class="map-container">
+        <canvas id="C_vector"></canvas>
+        <canvas id="C_raster"></canvas>
+    </div>
 <script src="script.js"></script>
 </body>
 </html>
