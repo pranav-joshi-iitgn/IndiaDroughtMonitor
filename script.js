@@ -33,6 +33,8 @@ const state = {
 
     hoverCoords: null,
 
+    selectedStateId: null,
+
     gridState: null,
     stateStep: 0.0625,
     stateRows: 0,
@@ -135,8 +137,55 @@ function resetZoom() {
     state.lat_E = state.base.lat_E;
     state.long_N = state.base.long_N; 
     state.long_S = state.base.long_S;
+
+    state.selectedStateId = null;
+
     renderStaticMap();
     renderDynamicHUD();
+}
+
+/**
+ * Scans the underlying state matrix to calculate the geometric envelope of a state 
+ * and fits the canvas camera smoothly over it with a 0.5-degree margin cushion.
+ */
+function zoomToStateBoundingBox(stateId) {
+    if (!state.gridState) return;
+
+    state.selectedStateId = stateId;
+
+    let minR = Infinity, maxR = -Infinity;
+    let minC = Infinity, maxC = -Infinity;
+
+    // Scan the matrix index footprint to find the extreme bounds of the selected ID
+    for (let r = 0; r < state.stateRows; r++) {
+        for (let c = 0; c < state.stateCols; c++) {
+            if (state.gridState[r][c] === stateId) {
+                if (r < minR) minR = r;
+                if (r > maxR) maxR = r;
+                if (c < minC) minC = c;
+                if (c > maxC) maxC = c;
+            }
+        }
+    }
+
+    // If matching coordinate indices are found, convert back to geographic degrees
+    if (minR !== Infinity) {
+        // Row 0 is North (top), max row is South (bottom)
+        let maxLat = state.base.long_N - (minR * state.stateStep);
+        let minLat = state.base.long_N - (maxR * state.stateStep);
+        let minLng = state.base.lat_W + (minC * state.stateStep);
+        let maxLng = state.base.lat_W + (maxC * state.stateStep);
+
+        // Add a 0.5-degree padding envelope so the state doesn't look squeezed against the edge
+        const padding = 0.5;
+        state.lat_W = Math.max(state.base.lat_W, minLng - padding);
+        state.lat_E = Math.min(state.base.lat_E, maxLng + padding);
+        state.long_N = Math.min(state.base.long_N, maxLat + padding);
+        state.long_S = Math.max(state.base.long_S, minLat - padding);
+
+        // Re-render map structures to fit the newly adjusted frame bounds
+        renderStaticMap();
+    }
 }
 
 /**
@@ -183,6 +232,21 @@ function renderStaticMap() {
                     const cWeight = ic / interpolationFactor;
                     const currentLng = state.base.lat_W + ((col + 0.5 + cWeight) * state.dataStep);
                     if (currentLng < state.lat_W || currentLng > state.lat_E) continue;
+
+                    // PER-PIXEL MAP MASKING FILTER
+                    if (state.gridState) {
+                        const sR = Math.round((state.base.long_N - currentLat) / state.stateStep);
+                        const sC = Math.round((currentLng - state.base.lat_W) / state.stateStep);
+                        const cellStateId = state.gridState[sR]?.[sC] ?? null;
+
+                        if (state.selectedStateId !== null) {
+                            // If a single state is selected, only draw pixels belonging to that state
+                            if (cellStateId !== state.selectedStateId) continue;
+                        } else {
+                            // Otherwise, only draw if inside India's landmass (boundary = 1, state ID > 1)
+                            if (!cellStateId || cellStateId < 1) continue;
+                        }
+                    }
 
                     // Bilinear Interpolation of Climate Value
                     const topInterp = validV00 * (1 - cWeight) + validV01 * cWeight;
@@ -413,8 +477,42 @@ function setupEventListeners() {
             state.lat_E = state.lat_W + (xMaxPx / state.plotWidth) * currentDegW;
             state.long_N = state.long_N - (yMinPx / state.plotHeight) * currentDegH;
             state.long_S = state.long_N - (yMaxPx / state.plotHeight) * currentDegH;
+
+            state.selectedStateId = null;
             
             renderStaticMap();
+        } else {
+            // Handles discrete clicks on the canvas
+            const clickX = state.startSelectX - state.margin.left;
+            const clickY = state.startSelectY - state.margin.top;
+            
+            if (clickX >= 0 && clickX <= state.plotWidth && clickY >= 0 && clickY <= state.plotHeight) {
+                const { lat, lng } = screenToGeo(clickX, clickY);
+                let sR = Math.round((state.base.long_N - lat) / state.stateStep);
+                let sC = Math.round((lng - state.base.lat_W) / state.stateStep);
+                let stateId = state.gridState?.[sR]?.[sC] ?? null;
+
+                // Robustness helper: if the user clicks exactly on a border pixel (value 1),
+                // scan a small 5x5 neighborhood window to grab the adjacent state ID
+                if (stateId === 1) {
+                    let foundId = null;
+                    for (let dr = -2; dr <= 2 && !foundId; dr++) {
+                        for (let dc = -2; dc <= 2; dc++) {
+                            const targetId = state.gridState?.[sR + dr]?.[sC + dc];
+                            if (targetId > 1) {
+                                foundId = targetId;
+                                break;
+                            }
+                        }
+                    }
+                    if (foundId) stateId = foundId;
+                }
+
+                // If a valid state zone was registered, calculate boundaries and zoom
+                if (stateId && stateId > 1) {
+                    zoomToStateBoundingBox(stateId);
+                }
+            }
         }
         renderDynamicHUD();
     });

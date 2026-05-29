@@ -11,10 +11,13 @@ from shapely.geometry import Point
 print("Loading India boundaries...")
 
 try:
-    gdf = gpd.read_file("india_states.json")
+    # gdf = gpd.read_file("india_states.json")
+    gdf = gpd.read_file("states.geojson")
 except Exception as e:
     print(f"Failed to load map data: {e}")
     exit()
+
+gdf["geometry"] = gdf["geometry"].make_valid()
 
 # Keep valid geometries only
 gdf = gdf[gdf.geometry.notnull()]
