@@ -262,17 +262,21 @@ function renderStaticMap() {
     for (let r = 0; r < state.totalRows - 1; r++) {
         for (let col = 0; col < state.totalCols - 1; col++) {
             
-            const v00 = state.gridCDI[r][col];
-            const v01 = state.gridCDI[r][col + 1] ?? v00;
-            const v10 = state.gridCDI[r + 1][col] ?? v00;
-            const v11 = state.gridCDI[r + 1][col + 1] ?? v01 ?? v10;
+            // FIX: Read each corner completely independently of the others
+            const v00 = state.gridCDI[r]?.[col] ?? null;
+            const v01 = state.gridCDI[r]?.[col + 1] ?? null;
+            const v10 = state.gridCDI[r + 1]?.[col] ?? null;
+            const v11 = state.gridCDI[r + 1]?.[col + 1] ?? null;
 
+            // Only skip if ALL four corners are completely empty ocean points
             if (v00 === null && v01 === null && v10 === null && v11 === null) continue;
 
-            const validV00 = v00 ?? v01 ?? v10 ?? v11;
-            const validV01 = v01 ?? validV00;
-            const validV10 = v10 ?? validV00;
-            const validV11 = v11 ?? validV01 ?? validV10;
+            // Extract a guaranteed valid land value to use as a fallback
+            const fallbackLandValue = v00 ?? v01 ?? v10 ?? v11;
+            const validV00 = v00 ?? fallbackLandValue;
+            const validV01 = v01 ?? fallbackLandValue;
+            const validV10 = v10 ?? fallbackLandValue;
+            const validV11 = v11 ?? fallbackLandValue;
 
             for (let ir = 0; ir < interpolationFactor; ir++) {
                 const rWeight = ir / interpolationFactor;
@@ -299,10 +303,44 @@ function renderStaticMap() {
                         }
                     }
 
-                    // Bilinear Interpolation of Climate Value
-                    const topInterp = validV00 * (1 - cWeight) + validV01 * cWeight;
-                    const bottomInterp = validV10 * (1 - cWeight) + validV11 * cWeight;
-                    const interpolatedValue = topInterp * (1 - rWeight) + bottomInterp * rWeight;
+                    // // Bilinear Interpolation of Climate Value
+                    // const topInterp = validV00 * (1 - cWeight) + validV01 * cWeight;
+                    // const bottomInterp = validV10 * (1 - cWeight) + validV11 * cWeight;
+                    // const interpolatedValue = topInterp * (1 - rWeight) + bottomInterp * rWeight;
+
+                    // =========================================================
+                    // CORRECTED: Adaptive Interpolation 
+                    // =========================================================
+                    let interpolatedValue;
+
+                    // Check the RAW matrix directly to see if any corner is actually missing
+                    const raw00 = state.gridCDI[r]?.[col] ?? null;
+                    const raw01 = state.gridCDI[r]?.[col + 1] ?? null;
+                    const raw10 = state.gridCDI[r + 1]?.[col] ?? null;
+                    const raw11 = state.gridCDI[r + 1]?.[col + 1] ?? null;
+
+                    if (raw00 !== null && raw01 !== null && raw10 !== null && raw11 !== null) {
+                        // All 4 real data points exist -> Smooth Bilinear
+                        const topInterp = validV00 * (1 - cWeight) + validV01 * cWeight;
+                        const bottomInterp = validV10 * (1 - cWeight) + validV11 * cWeight;
+                        interpolatedValue = topInterp * (1 - rWeight) + bottomInterp * rWeight;
+                    } else {
+                        // Edge pixel with missing data -> Nearest Neighbor
+                        const isTop = rWeight < 0.5;
+                        const isLeft = cWeight < 0.5;
+                        
+                        // Grab the nearest RAW value
+                        if (isTop && isLeft) interpolatedValue = raw00;
+                        else if (isTop && !isLeft) interpolatedValue = raw01;
+                        else if (!isTop && isLeft) interpolatedValue = raw10;
+                        else interpolatedValue = raw11;
+                        
+                        // If the mathematically nearest neighbor itself is an empty ocean point, 
+                        // snap to the closest guaranteed valid landmass value.
+                        if (interpolatedValue === null) {
+                            interpolatedValue = validV00; 
+                        }
+                    }
 
                     const px = state.margin.left + ((currentLng - state.lat_W) / degWidth) * state.plotWidth;
                     const py = state.margin.top + ((state.long_N - currentLat) / degHeight) * state.plotHeight;
