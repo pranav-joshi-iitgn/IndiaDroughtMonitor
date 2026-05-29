@@ -195,7 +195,11 @@ for _, row in gdf.iterrows():
         
         # Build an explicit lat/lng sequence path array for the JS runtime
         path = [{"lat": lat, "lng": lng} for lng, lat in coords]
-        all_paths.append(path)
+        # all_paths.append(path)
+        all_paths.append({
+            "state_id": int(row["state_id"]),
+            "coordinates": path
+        })
 
 # Write out the structural coordinates sequence to its own file
 with open("state_vector_boundaries.json", "w") as f:

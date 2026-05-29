@@ -49,6 +49,8 @@ const state = {
 
     INTERP: 3,
 
+    isolateFocusedStateBoundaries: true,
+
 };
 
 /**
@@ -313,34 +315,8 @@ function renderStaticMap() {
     // Render State Boundaries directly onto c_raster
     if (!state.gridState) return;
 
-    // c_raster.fillStyle = "#000000"; // Black color for the circular points
-    
-    // // Choose your thickness here (e.g., 1 for ultra-thin, 1.5 for slightly more visible)
-    // const circleRadius = 2; 
-
-    // for (let r = 0; r < state.stateRows; r++) {
-    //     const currentLat = state.base.long_N - (r * state.stateStep);
-    //     if (currentLat > state.long_N || currentLat < state.long_S) continue;
-
-    //     for (let c = 0; c < state.stateCols; c++) {
-    //         if (state.gridState[r][c] === 1) { // 1 indicates boundary block
-    //             const currentLng = state.base.lat_W + (c * state.stateStep);
-    //             if (currentLng < state.lat_W || currentLng > state.lat_E) continue;
-
-    //             // Target center point coordinates for the shape
-    //             const px = state.margin.left + ((currentLng - state.lat_W) / degWidth) * state.plotWidth;
-    //             const py = state.margin.top + ((state.long_N - currentLat) / degHeight) * state.plotHeight;
-
-    //             // Draw a circle instead of a rectangle
-    //             c_raster.beginPath();
-    //             c_raster.arc(px, py, circleRadius, 0, 2 * Math.PI);
-    //             c_raster.fill();
-    //         }
-    //     }
-    // }
-
     // ============================================================
-    // UPDATED: Render Vector State Boundaries
+    // Render Vector State Boundaries
     // ============================================================
     if (state.stateVectorBoundaries && state.stateVectorBoundaries.length > 0) {
         c_raster.save();
@@ -350,12 +326,42 @@ function renderStaticMap() {
         
         c_raster.beginPath();
         
-        // Loop through every continuous border segment
-        state.stateVectorBoundaries.forEach(path => {
-            let firstPoint = true;
+        // // Loop through every continuous border segment
+        // state.stateVectorBoundaries.forEach(path => {
+        //     let firstPoint = true;
             
-            path.forEach(point => {
-                // Map geographic coordinates to current viewport pixels
+        //     path.forEach(point => {
+        //         // Map geographic coordinates to current viewport pixels
+        //         const degWidth = state.lat_E - state.lat_W;
+        //         const degHeight = state.long_N - state.long_S;
+        //         const px = state.margin.left + ((point.lng - state.lat_W) / degWidth) * state.plotWidth;
+        //         const py = state.margin.top + ((state.long_N - point.lat) / degHeight) * state.plotHeight;
+                
+        //         if (firstPoint) {
+        //             c_raster.moveTo(px, py);
+        //             firstPoint = false;
+        //         } else {
+        //             c_raster.lineTo(px, py);
+        //         }
+        //     });
+        // });
+
+        state.stateVectorBoundaries.forEach(item => {
+            // --------------------------------------------------------
+            // NEW: Filter out unselected boundaries if isolation flag is enabled
+            // --------------------------------------------------------
+            if (state.isolateFocusedStateBoundaries && 
+                state.selectedStateId !== null && 
+                item.state_id !== state.selectedStateId) {
+                return; // Skip drawing this boundary segment
+            }
+            // --------------------------------------------------------
+
+            let firstPoint = true;
+            // Now reading coordinates out of the structural object field
+            const pathPoints = item.coordinates || item; 
+            
+            pathPoints.forEach(point => {
                 const degWidth = state.lat_E - state.lat_W;
                 const degHeight = state.long_N - state.long_S;
                 const px = state.margin.left + ((point.lng - state.lat_W) / degWidth) * state.plotWidth;
@@ -375,7 +381,9 @@ function renderStaticMap() {
     }
 
     // Render Thick Solid Mainland Country Outer Boundary Line
-    if (state.mainlandBoundary && state.mainlandBoundary.length > 0) {
+    if (state.mainlandBoundary && state.mainlandBoundary.length > 0 
+        && ((!state.isolateFocusedStateBoundaries) || state.selectedStateId == null)
+    ) {
         c_raster.save();
         c_raster.strokeStyle = "#000000"; // Set line color to solid black
         c_raster.lineWidth = 2.5;         // Define the exact thickness of your country border line
