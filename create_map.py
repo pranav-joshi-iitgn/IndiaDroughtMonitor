@@ -1,8 +1,10 @@
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
+import json
 import pandas as pd
 from shapely.geometry import Point
+from matplotlib.colors import ListedColormap
 
 # ============================================================
 # 1. Load India boundaries
@@ -174,12 +176,70 @@ df.to_csv("states_with_boundaries.csv", index=False)
 print("Saved: states_with_boundaries.csv")
 
 # ============================================================
+# 7.5. Extract and Save Vector Boundaries as Sequences (JSON)
+# ============================================================
+
+print("Extracting vector boundaries for JSON path serialization...")
+
+all_paths = []
+
+for _, row in gdf.iterrows():
+    geom = row.geometry
+    
+    # Handle both standard Polygon and complex MultiPolygon shapes cleanly
+    polys = [geom] if geom.geom_type == 'Polygon' else geom.geoms
+    
+    for poly in polys:
+        # Extract the continuous exterior coordinate ring
+        coords = list(poly.exterior.coords)
+        
+        # Build an explicit lat/lng sequence path array for the JS runtime
+        path = [{"lat": lat, "lng": lng} for lng, lat in coords]
+        all_paths.append(path)
+
+# Write out the structural coordinates sequence to its own file
+with open("state_vector_boundaries.json", "w") as f:
+    json.dump(all_paths, f)
+
+print(f"Saved: state_vector_boundaries.json ({len(all_paths)} paths extracted)")
+
+# ============================================================
+# 7.6. Verify Extracted Vector Sequences (Validation Plot)
+# ============================================================
+
+print("Generating vector sequence validation plot...")
+
+# Set up a clean plot area mirroring geographic orientation
+fig, ax = plt.subplots(figsize=(10, 11))
+
+# Loop over the raw sequence dictionary objects exactly as formatted for the JSON file
+for path_idx, path in enumerate(all_paths):
+    # Unpack the coordinate objects into sequential arrays
+    lngs = [point["lng"] for point in path]
+    lats = [point["lat"] for point in path]
+    
+    # Plot each isolated sequence path with an independent color
+    # This immediately catches if any lines cross cross-country or stretch incorrectly
+    ax.plot(lngs, lats, linewidth=1.2, alpha=0.85)
+
+ax.set_title(
+    f"Vector Sequences Verification Map\n(Successfully Verified {len(all_paths)} Paths)", 
+    fontsize=13, 
+    fontweight="bold"
+)
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+ax.grid(True, linestyle="--", alpha=0.5)
+ax.set_aspect('equal') # Absolute critical constraint to prevent aspect-stretching
+
+print("Displaying vector path verification map window...")
+plt.show()
+
+# ============================================================
 # 8. Display raster map
 # ============================================================
 
 print("Displaying map...")
-
-from matplotlib.colors import ListedColormap
 
 # ------------------------------------------------------------
 # Build color table

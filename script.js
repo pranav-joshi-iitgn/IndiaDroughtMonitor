@@ -41,6 +41,7 @@ const state = {
     stateCols: 0,
 
     mainlandBoundary: [],
+    stateVectorBoundaries: [],
 
     // Place this inside your existing const state = { ... } object definition:
     isAnimating: false,
@@ -93,6 +94,19 @@ async function loadStateData() {
             state.gridState[r][c] = p.val;
         }
     });
+}
+
+/**
+ * Handles internal state boundary vector paths acquisition
+ */
+async function loadStateVectorBoundaries() {
+    try {
+        const response = await fetch('./state_vector_boundaries.json');
+        state.stateVectorBoundaries = await response.json();
+        console.log(`Loaded ${state.stateVectorBoundaries.length} vector paths.`);
+    } catch (e) {
+        console.error("Failed to load vector boundaries:", e);
+    }
 }
 
 /**
@@ -178,11 +192,43 @@ function zoomToStateBoundingBox(stateId) {
 
         // Add a 0.5-degree padding envelope so the state doesn't look squeezed against the edge
         const padding = 0.5;
-        state.lat_W = Math.max(state.base.lat_W, minLng - padding);
-        state.lat_E = Math.min(state.base.lat_E, maxLng + padding);
-        state.long_N = Math.min(state.base.long_N, maxLat + padding);
-        state.long_S = Math.max(state.base.long_S, minLat - padding);
+        let targetMinLng = minLng - padding;
+        let targetMaxLng = maxLng + padding;
+        let targetMaxLat = maxLat + padding;
+        let targetMinLat = minLat - padding;
 
+        // ============================================================
+        // FIXED: ASPECT RATIO CORRECTION
+        // ============================================================
+        // 1. Calculate raw dimensions of the target bounding box
+        let geoWidth = targetMaxLng - targetMinLng;
+        let geoHeight = targetMaxLat - targetMinLat;
+
+        // 2. Determine target aspect ratio from actual canvas plot dimensions
+        const canvasAspectRatio = state.plotWidth / state.plotHeight; 
+        const currentAspectRatio = geoWidth / geoHeight;
+
+        // 3. Expand the smaller axis from its center point to balance the scale
+        if (currentAspectRatio > canvasAspectRatio) {
+            // Box is wider than canvas ratio -> Expand height
+            const desiredHeight = geoWidth / canvasAspectRatio;
+            const heightDiff = desiredHeight - geoHeight;
+            targetMaxLat += heightDiff / 2;
+            targetMinLat -= heightDiff / 2;
+        } else {
+            // Box is taller than canvas ratio -> Expand width
+            const desiredWidth = geoHeight * canvasAspectRatio;
+            const widthDiff = desiredWidth - geoWidth;
+            targetMaxLng += widthDiff / 2;
+            targetMinLng -= widthDiff / 2;
+        }
+
+        // 4. Safely clamp final coordinates inside overall baseline reference maps
+        state.lat_W = Math.max(state.base.lat_W, targetMinLng);
+        state.lat_E = Math.min(state.base.lat_E, targetMaxLng);
+        state.long_N = Math.min(state.base.long_N, targetMaxLat);
+        state.long_S = Math.max(state.base.long_S, targetMinLat);
+        // ============================================================
         // Re-render map structures to fit the newly adjusted frame bounds
         renderStaticMap();
     }
@@ -267,37 +313,72 @@ function renderStaticMap() {
     // Render State Boundaries directly onto c_raster
     if (!state.gridState) return;
 
-    c_raster.fillStyle = "#000000"; // Black color for the circular points
+    // c_raster.fillStyle = "#000000"; // Black color for the circular points
     
-    // Choose your thickness here (e.g., 1 for ultra-thin, 1.5 for slightly more visible)
-    const circleRadius = 1; 
+    // // Choose your thickness here (e.g., 1 for ultra-thin, 1.5 for slightly more visible)
+    // const circleRadius = 2; 
 
-    for (let r = 0; r < state.stateRows; r++) {
-        const currentLat = state.base.long_N - (r * state.stateStep);
-        if (currentLat > state.long_N || currentLat < state.long_S) continue;
+    // for (let r = 0; r < state.stateRows; r++) {
+    //     const currentLat = state.base.long_N - (r * state.stateStep);
+    //     if (currentLat > state.long_N || currentLat < state.long_S) continue;
 
-        for (let c = 0; c < state.stateCols; c++) {
-            if (state.gridState[r][c] === 1) { // 1 indicates boundary block
-                const currentLng = state.base.lat_W + (c * state.stateStep);
-                if (currentLng < state.lat_W || currentLng > state.lat_E) continue;
+    //     for (let c = 0; c < state.stateCols; c++) {
+    //         if (state.gridState[r][c] === 1) { // 1 indicates boundary block
+    //             const currentLng = state.base.lat_W + (c * state.stateStep);
+    //             if (currentLng < state.lat_W || currentLng > state.lat_E) continue;
 
-                // Target center point coordinates for the shape
-                const px = state.margin.left + ((currentLng - state.lat_W) / degWidth) * state.plotWidth;
-                const py = state.margin.top + ((state.long_N - currentLat) / degHeight) * state.plotHeight;
+    //             // Target center point coordinates for the shape
+    //             const px = state.margin.left + ((currentLng - state.lat_W) / degWidth) * state.plotWidth;
+    //             const py = state.margin.top + ((state.long_N - currentLat) / degHeight) * state.plotHeight;
 
-                // Draw a circle instead of a rectangle
-                c_raster.beginPath();
-                c_raster.arc(px, py, circleRadius, 0, 2 * Math.PI);
-                c_raster.fill();
-            }
-        }
+    //             // Draw a circle instead of a rectangle
+    //             c_raster.beginPath();
+    //             c_raster.arc(px, py, circleRadius, 0, 2 * Math.PI);
+    //             c_raster.fill();
+    //         }
+    //     }
+    // }
+
+    // ============================================================
+    // UPDATED: Render Vector State Boundaries
+    // ============================================================
+    if (state.stateVectorBoundaries && state.stateVectorBoundaries.length > 0) {
+        c_raster.save();
+        c_raster.strokeStyle = "#000000"; // Black state borders
+        c_raster.lineWidth = 1.0;         // Crisp, thin 1px lines
+        c_raster.lineJoin = "round";
+        
+        c_raster.beginPath();
+        
+        // Loop through every continuous border segment
+        state.stateVectorBoundaries.forEach(path => {
+            let firstPoint = true;
+            
+            path.forEach(point => {
+                // Map geographic coordinates to current viewport pixels
+                const degWidth = state.lat_E - state.lat_W;
+                const degHeight = state.long_N - state.long_S;
+                const px = state.margin.left + ((point.lng - state.lat_W) / degWidth) * state.plotWidth;
+                const py = state.margin.top + ((state.long_N - point.lat) / degHeight) * state.plotHeight;
+                
+                if (firstPoint) {
+                    c_raster.moveTo(px, py);
+                    firstPoint = false;
+                } else {
+                    c_raster.lineTo(px, py);
+                }
+            });
+        });
+        
+        c_raster.stroke(); // Draw all paths at once (extremely fast)
+        c_raster.restore();
     }
 
     // Render Thick Solid Mainland Country Outer Boundary Line
     if (state.mainlandBoundary && state.mainlandBoundary.length > 0) {
         c_raster.save();
         c_raster.strokeStyle = "#000000"; // Set line color to solid black
-        c_raster.lineWidth = 5;//2.5;         // Define the exact thickness of your country border line
+        c_raster.lineWidth = 2.5;         // Define the exact thickness of your country border line
         c_raster.lineJoin = "round";
         c_raster.lineCap = "round";
         
@@ -473,10 +554,13 @@ function setupEventListeners() {
             const currentDegW = state.lat_E - state.lat_W;
             const currentDegH = state.long_N - state.long_S;
 
-            state.lat_W = state.lat_W + (xMinPx / state.plotWidth) * currentDegW;
-            state.lat_E = state.lat_W + (xMaxPx / state.plotWidth) * currentDegW;
-            state.long_N = state.long_N - (yMinPx / state.plotHeight) * currentDegH;
-            state.long_S = state.long_N - (yMaxPx / state.plotHeight) * currentDegH;
+            const oldLatW = state.lat_W;
+            const oldLongN = state.long_N;
+
+            state.lat_W = oldLatW + (xMinPx / state.plotWidth) * currentDegW;
+            state.lat_E = oldLatW + (xMaxPx / state.plotWidth) * currentDegW;
+            state.long_N = oldLongN - (yMinPx / state.plotHeight) * currentDegH;
+            state.long_S = oldLongN - (yMaxPx / state.plotHeight) * currentDegH;
 
             state.selectedStateId = null;
             
@@ -548,6 +632,7 @@ async function init() {
     await loadCDIData();
     await loadStateData();
     await loadMainlandBoundaryData();
+    await loadStateVectorBoundaries();
     setupEventListeners();
 
     // Inside init() - Bind the control panel elements:
