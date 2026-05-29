@@ -31,7 +31,12 @@ const state = {
     startSelectX: 0, startSelectY: 0,
     currentSelectX: 0, currentSelectY: 0,
 
-    hoverCoords: null
+    hoverCoords: null,
+
+    gridState: null,
+    stateStep: 0.0625,
+    stateRows: 0,
+    stateCols: 0,
 };
 
 /**
@@ -57,6 +62,26 @@ function getOfficialCDIColor(val, minVal, maxVal) {
     if (norm < 0.55) return [255, 255, 0];
     if (norm < 0.75) return [170, 255, 170];
     return [56, 168, 0];
+}
+
+/**
+ * Handles state boundary and ID acquisition and sets matrix values
+ */
+async function loadStateData() {
+    const queryState = `
+        SELECT CAST([lat] AS FLOAT) AS lat, CAST([lng] AS FLOAT) AS lng, CAST([value] AS INT) AS val 
+        FROM csv('./states_with_boundaries.csv', {headers:true, separator:','}) 
+        WHERE CAST([value] AS INT) >= 1
+    `;
+    const dataState = await runQuery(queryState);
+    
+    dataState.forEach(p => {
+        const r = Math.round((state.base.long_N - p.lat) / state.stateStep);
+        const c = Math.round((p.lng - state.base.lat_W) / state.stateStep);
+        if (r >= 0 && r < state.stateRows && c >= 0 && c < state.stateCols) {
+            state.gridState[r][c] = p.val;
+        }
+    });
 }
 
 /**
@@ -107,8 +132,9 @@ function renderStaticMap() {
 
     const baseDegWidth = state.base.lat_E - state.base.lat_W;
     const zoomRatio = baseDegWidth / degWidth; 
-    const interpolationFactor = Math.min(Math.max(2, Math.round(2 * zoomRatio)), 8); 
-
+    // const interpolationFactor = Math.min(Math.max(2, Math.round(2 * zoomRatio)), 8); 
+    const interpolationFactor = Math.min(Math.max(4, Math.round(4 * zoomRatio)), 16);
+    
     const stepSizeDeg = state.dataStep / interpolationFactor;
     const blockWidthPx = (stepSizeDeg / degWidth) * state.plotWidth;
     const blockHeightPx = (stepSizeDeg / degHeight) * state.plotHeight;
@@ -153,6 +179,35 @@ function renderStaticMap() {
             }
         }
     }
+
+// Render State Boundaries directly onto c_raster
+    if (!state.gridState) return;
+
+    c_raster.fillStyle = "#000000"; // Black color for the circular points
+    
+    // Choose your thickness here (e.g., 1 for ultra-thin, 1.5 for slightly more visible)
+    const circleRadius = 1; 
+
+    for (let r = 0; r < state.stateRows; r++) {
+        const currentLat = state.base.long_N - (r * state.stateStep);
+        if (currentLat > state.long_N || currentLat < state.long_S) continue;
+
+        for (let c = 0; c < state.stateCols; c++) {
+            if (state.gridState[r][c] === 1) { // 1 indicates boundary block
+                const currentLng = state.base.lat_W + (c * state.stateStep);
+                if (currentLng < state.lat_W || currentLng > state.lat_E) continue;
+
+                // Target center point coordinates for the shape
+                const px = state.margin.left + ((currentLng - state.lat_W) / degWidth) * state.plotWidth;
+                const py = state.margin.top + ((state.long_N - currentLat) / degHeight) * state.plotHeight;
+
+                // Draw a circle instead of a rectangle
+                c_raster.beginPath();
+                c_raster.arc(px, py, circleRadius, 0, 2 * Math.PI);
+                c_raster.fill();
+            }
+        }
+    }
 }
 
 /**
@@ -161,19 +216,24 @@ function renderStaticMap() {
 function renderDynamicHUD() {
     c_vector.clearRect(0, 0, C_vector.width, C_vector.height);
 
-    // Render Tooltip Metrics
+    // Inside renderDynamicHUD() where tooltips are rendered:
     if (state.hoverCoords) {
         c_vector.save();
         c_vector.fillStyle = "rgba(20, 20, 20, 0.95)";
-        c_vector.fillRect(state.margin.left + 15, state.margin.top + 15, 200, 65);
-        c_vector.strokeStyle = "#444";
-        c_vector.strokeRect(state.margin.left + 15, state.margin.top + 15, 200, 65);
+        c_vector.fillRect(state.margin.left + 15, state.margin.top + 15, 200, 80); // Height expanded to 80
+        c_vector.strokeStyle = "#534d4d";
+        c_vector.strokeRect(state.margin.left + 15, state.margin.top + 15, 200, 80); // Height expanded to 80
         
         c_vector.fillStyle = "#ffffff";
         c_vector.font = "bold 12px monospace";
         c_vector.fillText(`LAT : ${state.hoverCoords.lat.toFixed(4)}°N`, state.margin.left + 30, state.margin.top + 35);
         c_vector.fillText(`LNG : ${state.hoverCoords.lng.toFixed(4)}°E`, state.margin.left + 30, state.margin.top + 50);
         c_vector.fillText(`VAL : ${state.hoverCoords.val !== null ? state.hoverCoords.val.toFixed(3) : "NaN"}`, state.margin.left + 30, state.margin.top + 65);
+        
+        // Display the state ID only if it represents an actual area (> 1)
+        const displayState = state.hoverCoords.stateId && state.hoverCoords.stateId > 1 ? state.hoverCoords.stateId : "N/A";
+        c_vector.fillText(`STATE: ${displayState}`, state.margin.left + 30, state.margin.top + 80);
+        
         c_vector.restore();
     }
 
@@ -251,8 +311,13 @@ function setupEventListeners() {
             const { lat, lng } = screenToGeo(x, y);
             const { r, c } = geoToGridIndices(lat, lng);
             const val = state.gridCDI[r]?.[c] ?? null;
+            
+            // Calculate corresponding indices for the state grid
+            const sR = Math.round((state.base.long_N - lat) / state.stateStep);
+            const sC = Math.round((lng - state.base.lat_W) / state.stateStep);
+            const stateId = state.gridState?.[sR]?.[sC] ?? null;
 
-            state.hoverCoords = { lat, lng, val };
+            state.hoverCoords = { lat, lng, val, stateId };
         } else { 
             state.hoverCoords = null; 
         }
@@ -311,8 +376,13 @@ async function init() {
     // Allocate matrix arrays
     state.gridCDI = Array(state.totalRows).fill(null).map(() => Array(state.totalCols).fill(null));
 
+    state.stateRows = Math.round((state.base.long_N - state.base.long_S) / state.stateStep) + 1;
+    state.stateCols = Math.round((state.base.lat_E - state.base.lat_W) / state.stateStep) + 1;
+    state.gridState = Array(state.stateRows).fill(null).map(() => Array(state.stateCols).fill(null));
+
     // Execute setup components
     await loadCDIData();
+    await loadStateData();
     setupEventListeners();
 
     // Perform initial display paint operations

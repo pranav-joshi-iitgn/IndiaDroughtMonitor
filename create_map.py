@@ -35,7 +35,8 @@ print(f"Loaded {len(gdf)} states.")
 # 2. Define raster grid
 # ============================================================
 
-STEP = 0.125
+# STEP = 0.125
+STEP = 0.0625  # Lowered from 0.125 to double the resolution density
 
 min_lng, max_lng = 68.0, 98.0
 min_lat, max_lat = 6.0, 38.0
@@ -115,7 +116,8 @@ print("Rasterizing boundaries...")
 
 # Boundary thickness in degrees
 # Smaller = thinner lines
-BOUNDARY_THRESHOLD = STEP * 0.55
+# BOUNDARY_THRESHOLD = STEP * 0.55
+BOUNDARY_THRESHOLD = STEP * 0.45  # Reduced from 0.55 for sharper boundary tracking
 
 for _, state in gdf.iterrows():
 
