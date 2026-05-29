@@ -51,6 +51,9 @@ const state = {
 
     isolateFocusedStateBoundaries: true,
 
+    hoveredStateId: null,
+    hoveredStateName: null,
+
 };
 
 /**
@@ -320,45 +323,19 @@ function renderStaticMap() {
     // ============================================================
     if (state.stateVectorBoundaries && state.stateVectorBoundaries.length > 0) {
         c_raster.save();
-        c_raster.strokeStyle = "#000000"; // Black state borders
-        c_raster.lineWidth = 1.0;         // Crisp, thin 1px lines
-        c_raster.lineJoin = "round";
-        
         c_raster.beginPath();
-        
-        // // Loop through every continuous border segment
-        // state.stateVectorBoundaries.forEach(path => {
-        //     let firstPoint = true;
-            
-        //     path.forEach(point => {
-        //         // Map geographic coordinates to current viewport pixels
-        //         const degWidth = state.lat_E - state.lat_W;
-        //         const degHeight = state.long_N - state.long_S;
-        //         const px = state.margin.left + ((point.lng - state.lat_W) / degWidth) * state.plotWidth;
-        //         const py = state.margin.top + ((state.long_N - point.lat) / degHeight) * state.plotHeight;
-                
-        //         if (firstPoint) {
-        //             c_raster.moveTo(px, py);
-        //             firstPoint = false;
-        //         } else {
-        //             c_raster.lineTo(px, py);
-        //         }
-        //     });
-        // });
+        c_raster.strokeStyle = "#000000"; // Black state borders
+        c_raster.lineWidth = 1.5;         // Crisp, thin 1px lines
+        c_raster.lineJoin = "round";
 
         state.stateVectorBoundaries.forEach(item => {
-            // --------------------------------------------------------
-            // NEW: Filter out unselected boundaries if isolation flag is enabled
-            // --------------------------------------------------------
             if (state.isolateFocusedStateBoundaries && 
                 state.selectedStateId !== null && 
                 item.state_id !== state.selectedStateId) {
-                return; // Skip drawing this boundary segment
+                return; 
             }
-            // --------------------------------------------------------
 
             let firstPoint = true;
-            // Now reading coordinates out of the structural object field
             const pathPoints = item.coordinates || item; 
             
             pathPoints.forEach(point => {
@@ -367,12 +344,8 @@ function renderStaticMap() {
                 const px = state.margin.left + ((point.lng - state.lat_W) / degWidth) * state.plotWidth;
                 const py = state.margin.top + ((state.long_N - point.lat) / degHeight) * state.plotHeight;
                 
-                if (firstPoint) {
-                    c_raster.moveTo(px, py);
-                    firstPoint = false;
-                } else {
-                    c_raster.lineTo(px, py);
-                }
+                if (firstPoint) { c_raster.moveTo(px, py); firstPoint = false; }
+                else { c_raster.lineTo(px, py); }
             });
         });
         
@@ -386,7 +359,7 @@ function renderStaticMap() {
     ) {
         c_raster.save();
         c_raster.strokeStyle = "#000000"; // Set line color to solid black
-        c_raster.lineWidth = 2.5;         // Define the exact thickness of your country border line
+        c_raster.lineWidth = 2.0;         // Define the exact thickness of your country border line
         c_raster.lineJoin = "round";
         c_raster.lineCap = "round";
         
@@ -419,6 +392,50 @@ function renderStaticMap() {
 function renderDynamicHUD() {
     c_vector.clearRect(0, 0, C_vector.width, C_vector.height);
 
+    // Inside renderDynamicHUD(), right after c_vector.clearRect:
+    if (state.hoveredStateId && state.stateVectorBoundaries) {
+        c_vector.save();
+        
+        c_vector.strokeStyle = "#2187f4";              // Neon Magenta outline
+        c_vector.fillStyle = "rgba(38, 147, 248, 0.2)";  // Translucent Magenta fill (20% opacity)
+        c_vector.lineWidth = 2.5;         
+        c_vector.lineJoin = "round";
+        
+        c_vector.beginPath();
+        
+        state.stateVectorBoundaries.forEach(item => {
+            if (item.state_id !== state.hoveredStateId) return;
+            
+            let firstPoint = true;
+            const pathPoints = item.coordinates || item; 
+            
+            pathPoints.forEach(point => {
+                const degWidth = state.lat_E - state.lat_W;
+                const degHeight = state.long_N - state.long_S;
+                const px = state.margin.left + ((point.lng - state.lat_W) / degWidth) * state.plotWidth;
+                const py = state.margin.top + ((state.long_N - point.lat) / degHeight) * state.plotHeight;
+                
+                if (firstPoint) { 
+                    c_vector.moveTo(px, py); 
+                    firstPoint = false; 
+                } else { 
+                    c_vector.lineTo(px, py); 
+                }
+            });
+            
+            // Close the sub-path loop so each polygon can be filled accurately
+            c_vector.closePath(); 
+        });
+        
+        // ==========================================
+        // NEW: Apply both Fill and Outline
+        // ==========================================
+        c_vector.fill();   // Draws the semi-transparent region interior
+        c_vector.stroke(); // Draws the crisp neon border
+        
+        c_vector.restore();
+    }
+
     // Inside renderDynamicHUD() where tooltips are rendered:
     if (state.hoverCoords) {
         c_vector.save();
@@ -433,9 +450,15 @@ function renderDynamicHUD() {
         c_vector.fillText(`LNG : ${state.hoverCoords.lng.toFixed(4)}°E`, state.margin.left + 30, state.margin.top + 50);
         c_vector.fillText(`VAL : ${state.hoverCoords.val !== null ? state.hoverCoords.val.toFixed(3) : "NaN"}`, state.margin.left + 30, state.margin.top + 65);
         
-        // Display the state ID only if it represents an actual area (> 1)
-        const displayState = state.hoverCoords.stateId && state.hoverCoords.stateId > 1 ? state.hoverCoords.stateId : "N/A";
-        c_vector.fillText(`STATE: ${displayState}`, state.margin.left + 30, state.margin.top + 80);
+        if (state.hoveredStateName) {
+            c_vector.fillStyle = "#FFD700"; // Gold color for the name
+            
+            c_vector.fillText(
+                `STATE : ${state.hoveredStateName}`, 
+                state.margin.left + 30, 
+                state.margin.top + 80
+            ); 
+        }
         
         c_vector.restore();
     }
@@ -469,6 +492,7 @@ function renderDynamicHUD() {
         c_vector.fillText(`WEEK: ${state.currentAnimationDateStr}`, C_vector.width - state.margin.right - 110, state.margin.top + 39);
         c_vector.restore();
     }
+
 }
 
 /**
@@ -531,19 +555,38 @@ function setupEventListeners() {
             const { r, c } = geoToGridIndices(lat, lng);
             const val = state.gridCDI[r]?.[c] ?? null;
             
-            // Calculate corresponding indices for the state grid
             const sR = Math.round((state.base.long_N - lat) / state.stateStep);
             const sC = Math.round((lng - state.base.lat_W) / state.stateStep);
             const stateId = state.gridState?.[sR]?.[sC] ?? null;
 
+            // ==========================================
+            // NEW: Highlight Change Detection
+            // ==========================================
+            let newHoveredId = (stateId && stateId > 1) ? stateId : null;
+            let newHoveredName = null;
+            
+            if (newHoveredId && state.stateVectorBoundaries) {
+                const boundsObj = state.stateVectorBoundaries.find(b => b.state_id === newHoveredId);
+                newHoveredName = boundsObj ? boundsObj.name : null;
+            }
+
+            if (state.hoveredStateId !== newHoveredId) {
+                state.hoveredStateId = newHoveredId;
+                state.hoveredStateName = newHoveredName;
+                // renderStaticMap(); // Trigger map redraw ONLY when crossing state borders
+            }
+            // ==========================================
+
             state.hoverCoords = { lat, lng, val, stateId };
         } else { 
             state.hoverCoords = null; 
-        }
-
-        if (state.isSelecting) {
-            state.currentSelectX = Math.max(state.margin.left, Math.min(e.clientX - rect.left, state.margin.left + state.plotWidth));
-            state.currentSelectY = Math.max(state.margin.top, Math.min(e.clientY - rect.top, state.margin.top + state.plotHeight));
+            
+            // NEW: Clear highlight if mouse goes out of bounds
+            if (state.hoveredStateId !== null) {
+                state.hoveredStateId = null;
+                state.hoveredStateName = null;
+                // renderStaticMap();
+            }
         }
         renderDynamicHUD();
     });

@@ -198,6 +198,7 @@ for _, row in gdf.iterrows():
         # all_paths.append(path)
         all_paths.append({
             "state_id": int(row["state_id"]),
+            "name": str(row["ST_NM"]),
             "coordinates": path
         })
 
