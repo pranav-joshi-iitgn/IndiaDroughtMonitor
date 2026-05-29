@@ -37,6 +37,8 @@ const state = {
     stateStep: 0.0625,
     stateRows: 0,
     stateCols: 0,
+
+    mainlandBoundary: []
 };
 
 /**
@@ -82,6 +84,18 @@ async function loadStateData() {
             state.gridState[r][c] = p.val;
         }
     });
+}
+
+/**
+ * Handles mainland country boundary coordinates acquisition
+ */
+async function loadMainlandBoundaryData() {
+    const queryMainland = `
+        SELECT CAST([lat] AS FLOAT) AS lat, CAST([lng] AS FLOAT) AS lng 
+        FROM csv('./india_mainland_boundary.csv', {headers:true, separator:','})
+    `;
+    state.mainlandBoundary = await runQuery(queryMainland);
+    console.log(`Loaded ${state.mainlandBoundary.length} mainland boundary track points.`);
 }
 
 /**
@@ -134,7 +148,7 @@ function renderStaticMap() {
     const zoomRatio = baseDegWidth / degWidth; 
     // const interpolationFactor = Math.min(Math.max(2, Math.round(2 * zoomRatio)), 8); 
     const interpolationFactor = Math.min(Math.max(4, Math.round(4 * zoomRatio)), 16);
-    
+
     const stepSizeDeg = state.dataStep / interpolationFactor;
     const blockWidthPx = (stepSizeDeg / degWidth) * state.plotWidth;
     const blockHeightPx = (stepSizeDeg / degHeight) * state.plotHeight;
@@ -156,12 +170,12 @@ function renderStaticMap() {
 
             for (let ir = 0; ir < interpolationFactor; ir++) {
                 const rWeight = ir / interpolationFactor;
-                const currentLat = state.base.long_N - ((r + rWeight) * state.dataStep);
+                const currentLat = state.base.long_N - ((r + 0.5 + rWeight) * state.dataStep);
                 if (currentLat > state.long_N || currentLat < state.long_S) continue;
 
                 for (let ic = 0; ic < interpolationFactor; ic++) {
                     const cWeight = ic / interpolationFactor;
-                    const currentLng = state.base.lat_W + ((col + cWeight) * state.dataStep);
+                    const currentLng = state.base.lat_W + ((col + 0.5 + cWeight) * state.dataStep);
                     if (currentLng < state.lat_W || currentLng > state.lat_E) continue;
 
                     // Bilinear Interpolation of Climate Value
@@ -180,7 +194,7 @@ function renderStaticMap() {
         }
     }
 
-// Render State Boundaries directly onto c_raster
+    // Render State Boundaries directly onto c_raster
     if (!state.gridState) return;
 
     c_raster.fillStyle = "#000000"; // Black color for the circular points
@@ -207,6 +221,36 @@ function renderStaticMap() {
                 c_raster.fill();
             }
         }
+    }
+
+    // Render Thick Solid Mainland Country Outer Boundary Line
+    if (state.mainlandBoundary && state.mainlandBoundary.length > 0) {
+        c_raster.save();
+        c_raster.strokeStyle = "#000000"; // Set line color to solid black
+        c_raster.lineWidth = 5;//2.5;         // Define the exact thickness of your country border line
+        c_raster.lineJoin = "round";
+        c_raster.lineCap = "round";
+        
+        c_raster.beginPath();
+        let firstPoint = true;
+        
+        for (let i = 0; i < state.mainlandBoundary.length; i++) {
+            const point = state.mainlandBoundary[i];
+            
+            // Map the latitude/longitude point coordinates directly into current viewport pixel boundaries
+            const px = state.margin.left + ((point.lng - state.lat_W) / degWidth) * state.plotWidth;
+            const py = state.margin.top + ((state.long_N - point.lat) / degHeight) * state.plotHeight;
+            
+            if (firstPoint) {
+                c_raster.moveTo(px, py);
+                firstPoint = false;
+            } else {
+                c_raster.lineTo(px, py);
+            }
+        }
+        
+        c_raster.stroke();
+        c_raster.restore();
     }
 }
 
@@ -264,8 +308,8 @@ async function loadCDIData() {
     const dataCDI = await runQuery(queryCDI);
     
     dataCDI.forEach(p => {
-        const r = Math.round((state.base.long_N - p.lat) / state.dataStep);
-        const c = Math.round((p.lng - state.base.lat_W) / state.dataStep);
+        const r = Math.floor((state.base.long_N - p.lat) / state.dataStep);
+        const c = Math.floor((p.lng - state.base.lat_W) / state.dataStep);
         if (r >= 0 && r < state.totalRows && c >= 0 && c < state.totalCols) {
             state.gridCDI[r][c] = p.val;
         }
@@ -383,6 +427,7 @@ async function init() {
     // Execute setup components
     await loadCDIData();
     await loadStateData();
+    await loadMainlandBoundaryData();
     setupEventListeners();
 
     // Perform initial display paint operations
