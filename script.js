@@ -38,7 +38,11 @@ const state = {
     stateRows: 0,
     stateCols: 0,
 
-    mainlandBoundary: []
+    mainlandBoundary: [],
+
+    // Place this inside your existing const state = { ... } object definition:
+    isAnimating: false,
+    currentAnimationDateStr: null,
 };
 
 /**
@@ -294,6 +298,22 @@ function renderDynamicHUD() {
         c_vector.strokeRect(state.startSelectX, state.startSelectY, rectW, rectH);
         c_vector.restore();
     }
+
+    // Inside renderDynamicHUD() - Render Active Date Overlay Window Frame:
+    if (state.isAnimating && state.currentAnimationDateStr) {
+        c_vector.save();
+        c_vector.fillStyle = "rgba(20, 20, 20, 0.95)";
+        c_vector.fillRect(C_vector.width - state.margin.right - 210, state.margin.top + 15, 200, 40);
+        c_vector.strokeStyle = "#0055ff";
+        c_vector.lineWidth = 1.5;
+        c_vector.strokeRect(C_vector.width - state.margin.right - 210, state.margin.top + 15, 200, 40);
+        
+        c_vector.fillStyle = "#ffffff";
+        c_vector.font = "bold 13px monospace";
+        c_vector.textAlign = "center";
+        c_vector.fillText(`WEEK: ${state.currentAnimationDateStr}`, C_vector.width - state.margin.right - 110, state.margin.top + 39);
+        c_vector.restore();
+    }
 }
 
 /**
@@ -430,7 +450,135 @@ async function init() {
     await loadMainlandBoundaryData();
     setupEventListeners();
 
+    // Inside init() - Bind the control panel elements:
+    const btnStart = document.getElementById("btn_start_anim");
+    const btnStop = document.getElementById("btn_stop_anim");
+    
+    if (btnStart) {
+        btnStart.addEventListener("click", () => {
+            const startVal = document.getElementById("anim_start_date").value;
+            const endVal = document.getElementById("anim_end_date").value;
+            const fpsVal = parseInt(document.getElementById("anim_fps").value, 10);
+            startCDIAnimation(startVal, endVal, fpsVal);
+        });
+    }
+    if (btnStop) {
+        btnStop.addEventListener("click", stopCDIAnimation);
+    }
+
     // Perform initial display paint operations
     renderStaticMap();
     renderDynamicHUD();
+}
+
+
+/**
+ * Asynchronously queries and extracts a specific target week's CDI matrix values
+ */
+async function loadCDIDataForDate(dateStr) {
+    const queryCDI = `
+        SELECT CAST([0] AS FLOAT) AS lat, CAST([1] AS FLOAT) AS lng, CAST([2] AS FLOAT) AS val 
+        FROM csv('./data/Drough_TS/CDI_${dateStr}.txt', {headers:false, separator: ' '}) 
+        WHERE [0] != 'NaN' AND [1] != 'NaN' AND [2] != 'NaN'
+    `;
+    const dataCDI = await runQuery(queryCDI);
+    
+    if (!dataCDI || dataCDI.length === 0) {
+        return false; // File missing or unreadable (signals gap jump)
+    }
+    
+    // Completely wipe out previous frame data matrix to avoid visual ghosting/leakage
+    for (let r = 0; r < state.totalRows; r++) {
+        state.gridCDI[r].fill(null);
+    }
+    
+    // Repopulate with new historical date target point coordinates
+    dataCDI.forEach(p => {
+        const r = Math.floor((state.base.long_N - p.lat) / state.dataStep);
+        const c = Math.floor((p.lng - state.base.lat_W) / state.dataStep);
+        if (r >= 0 && r < state.totalRows && c >= 0 && c < state.totalCols) {
+            state.gridCDI[r][c] = p.val;
+        }
+    });
+
+    return true;
+}
+
+/**
+ * Orchestrates step-by-step playback loops across dates at custom framerates
+ */
+async function startCDIAnimation(startDateInput = "2021-07-14", endDateInput = "2024-11-13", fps = 2) {
+    // Clear any active animation pipelines to prevent visual speed stacking
+    stopCDIAnimation();
+
+    let currentDate = parseDateString(startDateInput);
+    const endDate = parseDateString(endDateInput);
+
+    if (!currentDate || !endDate || currentDate > endDate) {
+        console.error("Invalid animation chronological bounds provided.");
+        return;
+    }
+
+    const intervalMs = 1000 / fps;
+    state.isAnimating = true;
+
+    async function animationTick() {
+        if (!state.isAnimating) return;
+
+        // Terminal animation exit evaluation point
+        if (currentDate > endDate) {
+            console.log("Timeline sequence completed.");
+            stopCDIAnimation();
+            return;
+        }
+
+        const dateStr = formatDateToYYYYMMDD(currentDate);
+        state.currentAnimationDateStr = `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+        
+        // Progress tracking state step ahead exactly 1 week (7 days) for Wednesday cycles
+        currentDate.setDate(currentDate.getDate() + 7);
+
+        const fileLoaded = await loadCDIDataForDate(dateStr);
+
+        if (fileLoaded) {
+            // Re-render data without modifying state viewport dimensions (preserves zoom level locks)
+            renderStaticMap();
+            renderDynamicHUD();
+            
+            // Wait for specified frame duration before evaluating the next block
+            setTimeout(animationTick, intervalMs);
+        } else {
+            // Instant recursive hop if target data does not exist (skips large gaps smoothly)
+            animationTick();
+        }
+    }
+
+    // Fire initial framework loop tick
+    animationTick();
+}
+
+/**
+ * Safely stops and resets player controls
+ */
+function stopCDIAnimation() {
+    state.isAnimating = false;
+    state.currentAnimationDateStr = null;
+    renderDynamicHUD();
+}
+
+// Internal Utility Date Parsers
+function parseDateString(str) {
+    const cleaned = str.replace(/-/g, "");
+    if (cleaned.length !== 8) return null;
+    const year = parseInt(cleaned.substring(0, 4), 10);
+    const month = parseInt(cleaned.substring(4, 6), 10) - 1;
+    const day = parseInt(cleaned.substring(6, 8), 10);
+    return new Date(year, month, day);
+}
+
+function formatDateToYYYYMMDD(date) {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}${mm}${dd}`;
 }
