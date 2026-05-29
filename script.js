@@ -43,6 +43,9 @@ const state = {
     // Place this inside your existing const state = { ... } object definition:
     isAnimating: false,
     currentAnimationDateStr: null,
+
+    INTERP: 3,
+
 };
 
 /**
@@ -150,8 +153,7 @@ function renderStaticMap() {
 
     const baseDegWidth = state.base.lat_E - state.base.lat_W;
     const zoomRatio = baseDegWidth / degWidth; 
-    // const interpolationFactor = Math.min(Math.max(2, Math.round(2 * zoomRatio)), 8); 
-    const interpolationFactor = Math.min(Math.max(4, Math.round(4 * zoomRatio)), 16);
+    const interpolationFactor = Math.min(Math.max(state.INTERP, Math.round(state.INTERP * zoomRatio)), 4*state.INTERP);
 
     const stepSizeDeg = state.dataStep / interpolationFactor;
     const blockWidthPx = (stepSizeDeg / degWidth) * state.plotWidth;
