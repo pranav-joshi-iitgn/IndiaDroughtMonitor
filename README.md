@@ -1,3 +1,9 @@
+NOTE: The updated and maintained codebase and data is located at `wcl-iitgn/IndiaDroughtMonitor`.
+This was a POC version for the website revamp which took place during the summer of 2026.
+
+A Medium Article with deep-dive into the architecture and the engineering decisions is available under the title  
+[India Drought Monitor](https://medium.com/@pranav.joshi_16395/india-drought-monitor-dbdd2263868e?sharedUserId=pranav.joshi_16395)
+
 # India Drought Monitor (IDM)
 
 A fully data-driven web front end for the India Drought Monitor, developed for the
